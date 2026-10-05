@@ -1,29 +1,26 @@
 # DeepBlue Rescue
 
-## Integrantes
-
-- **Luis Jaime Martínez Monsalvo** — Código: 2023214025
-- **Angélica Sierra Zapata** — Código: 2023214030
-
 ## Descripción
 
-DeepBlue Rescue es una aplicación desarrollada con Java 21 y Spring Boot 4 para gestionar información relacionada con el rescate y la atención de animales marinos.
+DeepBlue Rescue es una aplicación desarrollada con Java 25 y Spring Boot 4 para gestionar información relacionada con el rescate y la atención de animales marinos.
 
-El proyecto implementa persistencia de datos mediante Spring Data JPA y PostgreSQL. La estructura de la base de datos es creada y evolucionada exclusivamente con Flyway, mientras que Hibernate se utiliza para validar que las entidades coincidan con el esquema existente.
+El proyecto implementa persistencia de datos mediante Spring Data JPA y PostgreSQL. La estructura de la base de datos es creada y evolucionada exclusivamente con Flyway, mientras que Hibernate se utiliza para validar que las entidades coincidan con el esquema existente. También dispone de una capa de servicio encargada de aplicar reglas de negocio, controlar transacciones y transformar entidades en DTOs.
 
 Las pruebas de integración se ejecutan sobre una instancia real y temporal de PostgreSQL creada mediante Testcontainers.
 
 ## Tecnologías utilizadas
 
-* Java 21.
+* Java 25.
 * Spring Boot 4.1.1.
 * Maven Wrapper.
 * Spring Data JPA.
 * Hibernate.
 * PostgreSQL.
 * Flyway.
+* MapStruct 1.6.3.
 * Testcontainers.
 * JUnit 5.
+* Mockito.
 * AssertJ.
 * Docker Desktop.
 
@@ -179,6 +176,7 @@ findByNameIgnoreCase(String name)
 
 ```java
 findByAnimalIdOrderByPerformedAtAsc(Long animalId)
+findByAnimalAnimalCodeOrderByPerformedAtAsc(String animalCode)
 ```
 
 ## Consultas JPQL
@@ -200,7 +198,7 @@ Estas consultas utilizan los nombres de las entidades y sus atributos. No se uti
 Las pruebas se encuentran en:
 
 ```text
-src/test/java/com/deepblue/rescue/PersistenceIntegrationTest.java
+src/test/java/com/deepblue/rescue/PersistenceIntegrationIT.java
 ```
 
 Se implementaron 15 pruebas de integración para verificar:
@@ -249,10 +247,12 @@ docker ps
 
 ## Ejecución de las pruebas
 
-Desde la carpeta principal del proyecto, ejecutar:
+Las pruebas de integración se mantienen separadas de las pruebas unitarias del
+nuevo laboratorio. Desde la carpeta principal del proyecto, con Docker Desktop
+iniciado, ejecutar:
 
 ```powershell
-.\mvnw.cmd clean test
+.\mvnw.cmd "-Dtest=PersistenceIntegrationIT" test
 ```
 
 El resultado esperado es:
@@ -367,10 +367,138 @@ Aunque el estado se representa mediante un enum de Java, la restricción `CHECK`
 * Se priorizan los Query Methods.
 * Las consultas complejas utilizan JPQL.
 * No se utiliza Lombok `@Data` en las entidades.
-* No se implementaron controladores, servicios, DTO, seguridad, frontend, Kafka ni Docker Compose.
+* Se implementaron DTOs, mappers y servicios sin agregar controladores ni una API REST.
+* No se implementaron seguridad, frontend, Kafka ni Docker Compose.
 
 ## Conclusión
 
 El laboratorio permitió implementar y comprobar una capa de persistencia completa para DeepBlue Rescue. Flyway administra la evolución del esquema, JPA representa las entidades y sus relaciones, Spring Data facilita las consultas y Testcontainers permite verificar el funcionamiento del sistema sobre PostgreSQL real.
 
-Las pruebas confirman que las relaciones, consultas, migraciones y restricciones de integridad funcionan correctamente.
+Las pruebas confirman que las relaciones, consultas, migraciones y restricciones de integridad funcionan correctamente. La capa de servicio amplía el proyecto mediante reglas de negocio y pruebas unitarias aisladas de la base de datos.
+
+## Capa de servicio
+
+La capa de servicio se encuentra en:
+
+```text
+src/main/java/com/deepblue/rescue/service
+```
+
+Se implementaron los siguientes servicios:
+
+* `RescueCaseService`: consulta casos y controla las transiciones de estado.
+* `TreatmentService`: registra y consulta tratamientos.
+* `AnimalService`: consulta animales y determina si pueden recibir tratamientos.
+
+Las implementaciones utilizan inyección por constructor. Las consultas se ejecutan con `@Transactional(readOnly = true)` y las operaciones que modifican datos utilizan `@Transactional`.
+
+## DTOs y mappers
+
+Los objetos de transferencia se definieron mediante `record` y se encuentran en los paquetes `dto.request` y `dto.response`.
+
+MapStruct transforma las entidades en respuestas sin exponer directamente las relaciones JPA:
+
+```text
+RescueCase -> RescueCaseResponse
+Treatment  -> TreatmentResponse
+Animal     -> AnimalResponse
+```
+
+## Reglas de negocio implementadas
+
+### Transiciones de un caso de rescate
+
+El flujo permitido es:
+
+```text
+ADMITTED
+-> UNDER_EVALUATION
+-> IN_REHABILITATION
+-> READY_FOR_RELEASE
+-> RELEASED
+```
+
+Una transición que no siga este orden produce `BusinessRuleException` y no se guarda en la base de datos.
+
+### Registro de tratamientos
+
+Antes de registrar un tratamiento se comprueba que:
+
+1. El animal exista.
+2. El especialista exista.
+3. El especialista esté activo.
+4. El caso no esté `RELEASED` ni `CLOSED`.
+5. La fecha del tratamiento no sea anterior a la fecha del rescate.
+
+Los recursos inexistentes producen `ResourceNotFoundException`. Las operaciones prohibidas por el negocio producen `BusinessRuleException`.
+
+## Pruebas unitarias de los servicios
+
+Las pruebas unitarias se encuentran en:
+
+```text
+src/test/java/com/deepblue/rescue/service
+```
+
+Se implementaron 18 pruebas unitarias con JUnit, Mockito y AssertJ:
+
+* 5 pruebas para `RescueCaseServiceImpl`.
+* 7 pruebas para `TreatmentServiceImpl`.
+* 6 pruebas para `AnimalServiceImpl`.
+
+Estas pruebas utilizan repositorios y mappers simulados. No necesitan Spring ApplicationContext, PostgreSQL, Hibernate ni Testcontainers.
+
+En Windows se ejecuta el laboratorio de servicios completo con:
+
+```powershell
+.\mvnw.cmd clean test
+```
+
+El resultado esperado es `Tests run: 18` y `BUILD SUCCESS`. Estas pruebas no
+inician Spring, PostgreSQL ni Testcontainers, por lo que Docker no es necesario.
+
+Para ejecutar por separado las 15 pruebas de integración del laboratorio
+anterior, Docker Desktop debe estar iniciado:
+
+```powershell
+.\mvnw.cmd "-Dtest=PersistenceIntegrationIT" test
+```
+
+## Respuestas de análisis de la capa de servicio
+
+### Clasificación de responsabilidades
+
+| Necesidad | Capa responsable |
+|---|---|
+| Ejecutar el `SELECT` de un caso por código | Repository |
+| Validar una transición de estado | Service |
+| Convertir un caso de rescate en DTO | Mapper |
+| Guardar un tratamiento | Repository, coordinado por Service |
+| Verificar que el especialista esté activo | Service |
+| Crear la tabla `treatments` | Flyway |
+| Controlar una transacción | Service |
+| Representar información persistente | Entity |
+
+### ¿Por qué la validación del especialista activo no pertenece al Repository?
+
+Porque el Repository se encarga de acceder a los datos. La decisión de permitir o rechazar un tratamiento según el estado del especialista es una regla del negocio y debe permanecer en el Service.
+
+### ¿Qué operaciones son de solo lectura?
+
+`findByCode`, `findByStatus`, `findByAnimalCode` y las consultas de `AnimalService` utilizan `@Transactional(readOnly = true)`. `register` y `changeStatus` necesitan una transacción de escritura porque guardan modificaciones.
+
+### ¿Por qué es peligroso utilizar `Optional.get()`?
+
+Porque lanza `NoSuchElementException` cuando el valor no existe y no explica qué recurso faltó. `orElseThrow()` permite lanzar una excepción específica con un mensaje entendible.
+
+### ¿Por qué no se retornan entidades directamente?
+
+Retornar entidades aumenta el acoplamiento entre capas, puede activar relaciones `LAZY` fuera de una transacción y podría exponer información que el consumidor no necesita. Los DTOs crean un contrato más estable y permiten modificar el modelo persistente sin afectar automáticamente las demás capas.
+
+### Diferencia entre Entity y DTO
+
+Una Entity representa información persistente y sus relaciones con la base de datos. Un DTO transporta únicamente la información que otra capa necesita.
+
+### ¿Por qué las reglas de tratamiento pertenecen al Service?
+
+Porque registrar un tratamiento requiere coordinar varios repositorios, validar el estado del especialista y del caso, comprobar fechas y controlar una transacción completa. El Repository solo debe consultar o guardar información.
