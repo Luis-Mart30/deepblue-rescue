@@ -1,0 +1,9 @@
+﻿1. Se usa /api porque Vite redirige las solicitudes al backend mediante el proxy.
+2. request lanza el error para que TanStack Query rechace la promesa y active isError.
+3. El status forma parte de queryKey para mantener una caché independiente por estado.
+4. enabled evita ejecutar consultas cuando animalCode todavía no existe.
+5. invalidateQueries marca las listas como desactualizadas y vuelve a consultarlas.
+6. useReducer centraliza los campos y cambios del formulario.
+7. La clave ['animal', animalCode] invalida tratamientos, elegibilidad y datos del animal.
+
+Observaciones: el proyecto compiló correctamente. El backend inició en el puerto 8080 y el frontend en el puerto 5173.
